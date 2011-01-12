@@ -36,16 +36,15 @@ import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.IntWritable;
 
-public class GetTopNFields extends Configured implements Tool {
+public class CollectCatsOfShop extends Configured implements Tool {
 
 	public static class MapClass extends MapReduceBase implements
-			Mapper<LongWritable, Text, Text, IntWritable> {
+			Mapper<IntWritable, Text, IntWritable,Text> {
 
 		static enum Counters {
 			Items
 		}
-		private final static IntWritable one = new IntWritable(1);
-		private Text word = new Text();
+		private Text recordValue = new Text();
 
 		private boolean caseSensitive = true;
 		private Set<String> patternsToSkip = new HashSet<String>();
@@ -89,37 +88,44 @@ public class GetTopNFields extends Configured implements Tool {
 			}
 		}
 
-		public void map(LongWritable key, Text value,
-				OutputCollector<Text, IntWritable> output, Reporter reporter)
+		public void map(IntWritable key, Text value,
+				OutputCollector<IntWritable,Text> output, Reporter reporter)
 				throws IOException {
-			String line = (caseSensitive) ? value.toString() : value.toString()
-					.toLowerCase();
-			for (String pattern : patternsToSkip) {
-				line = line.replaceAll(pattern, "");
-			}
-			String[] records = line.split("\t");
-			if (records.length == 4) {
-				word.set(records[3].trim());
-				output.collect(word, one);
-				reporter.incrCounter(Counters.Items, 1);
-			}
-			if ((++numRecords % 100) == 0) {
-				reporter.setStatus("Finished processing " + numRecords
-						+ " records" + "from the input file:" + inputFile);
-			}
+			
+				String[] records = value.toString().split("\t");
+				if (records.length == 4) {
+					String txtValue = (caseSensitive) ? records[3]:records[3].toLowerCase();
+					txtValue = txtValue.trim();
+					for (String pattern : patternsToSkip) {
+						txtValue = txtValue.replaceAll(pattern, "");
+					}
+					recordValue.set(txtValue);
+					int idKey = Integer.parseInt(records[2]);
+					output.collect(new IntWritable(idKey), recordValue);
+					reporter.incrCounter(Counters.Items, 1);
+				}	
+				if ((++numRecords % 100) == 0) {
+					reporter.setStatus("Finished processing " + numRecords
+							+ " records" + "from the input file:" + inputFile);
+				}
 		}
 	}
 
 	public static class ReduceClass extends MapReduceBase implements
-			Reducer<Text, IntWritable, Text, IntWritable> {
-		public void reduce(Text key, Iterator<IntWritable> values,
-				OutputCollector<Text, IntWritable> output, Reporter reporter)
+			Reducer<IntWritable, Text, IntWritable, Text> {
+		
+		private Text recordValue = new Text();
+		
+		public void reduce(IntWritable key, Iterator<Text> values,
+				OutputCollector<IntWritable,Text> output, Reporter reporter)
 				throws IOException {
-			int sum = 0;
+			StringBuffer sb = new StringBuffer();
 			while (values.hasNext()) {
-				sum += values.next().get();
+				sb.append(values.next().toString());
+				sb.append(" ");
 			}
-			output.collect(key, new IntWritable(sum));
+			recordValue.set(sb.toString());
+			output.collect(key, recordValue);
 		}
 	}
 
@@ -127,8 +133,8 @@ public class GetTopNFields extends Configured implements Tool {
 		JobConf conf = new JobConf(getConf(), CollectCatsOfShop.class);
 		conf.setJobName("CollectCatsOfShop");
 
-		conf.setOutputKeyClass(Text.class);
-		conf.setOutputValueClass(IntWritable.class);
+		conf.setOutputKeyClass(IntWritable.class);
+		conf.setOutputValueClass(Text.class);
 
 		conf.setMapperClass(MapClass.class);
 		conf.setCombinerClass(ReduceClass.class);
@@ -146,20 +152,20 @@ public class GetTopNFields extends Configured implements Tool {
 			}
 		}
 
-		Path tempDir = new Path(other_args.get(1) + Integer.toString(new Random().nextInt(Integer.MAX_VALUE)));
+		//Path tempDir = new Path(other_args.get(1) + Integer.toString(new Random().nextInt(Integer.MAX_VALUE)));
 
 		try {
 			FileInputFormat.setInputPaths(conf, new Path(other_args.get(0)));
 
-			conf.setOutputFormat(SequenceFileOutputFormat.class);
-			FileOutputFormat.setOutputPath(conf, tempDir);
+			conf.setOutputFormat(TextOutputFormat.class);
+			FileOutputFormat.setOutputPath(conf, new Path(other_args.get(1)));
 
 			JobClient.runJob(conf);
 
 			// Sort the output to get the topn result;
-			JobConf sortJob = new JobConf(getConf(), GetTopNFields.class);
-			sortJob.setJobName("Sort Fields");
-			sortJob.setMapperClass(InverseMapper.class);
+			//JobConf sortJob = new JobConf(getConf(), GetTopNFields.class);
+			//sortJob.setJobName("Sort Fields");
+			/*sortJob.setMapperClass(InverseMapper.class);
 			sortJob.setNumReduceTasks(1);
 
 			sortJob.setInputFormat(SequenceFileInputFormat.class);
@@ -169,9 +175,10 @@ public class GetTopNFields extends Configured implements Tool {
 
 			FileInputFormat.setInputPaths(sortJob, tempDir);
 			FileOutputFormat.setOutputPath(sortJob, new Path(other_args.get(1)));
-			JobClient.runJob(sortJob);
+			JobClient.runJob(sortJob);*/
 		} finally {
-			FileSystem.get(conf).delete(tempDir);			
+			//FileSystem.get(conf).delete(tempDir);
+			
 		}
 		return 0;
 	}

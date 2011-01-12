@@ -1,6 +1,7 @@
 package com.taobao.search.sc.utils;
 
 import java.io.IOException;
+import java.util.Iterator;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
@@ -26,8 +27,21 @@ public class ExtractCommodities extends Configured implements Tool {
 		}
 	}
 		
+	public static class ReducerClass extends MapReduceBase implements Reducer<LongWritable, Text, LongWritable, Text>{
+		public void reduce(LongWritable key, 
+						   Iterator<Text> values, 
+						   OutputCollector<LongWritable, Text> output, 
+						   Reporter reporter) throws IOException{
+			StringBuffer sb = new StringBuffer();
+			while(values.hasNext()){
+				sb.append(values.next().toString());
+				sb.append(" ");
+			}
+			output.collect(key, new Text(sb.toString()));
+		}
+	}
 	
-	@Override
+	
 	public int run(String[] args) throws Exception {
 		JobConf conf = new JobConf(getConf(),ExtractCommodities.class);
 		conf.setJobName("ExtractCommodities");
@@ -35,7 +49,7 @@ public class ExtractCommodities extends Configured implements Tool {
 		conf.setOutputValueClass(Text.class);
 		
 		conf.setMapperClass(MapperClass.class);
-		conf.setCombinerClass(ReducerClass.clas);
+		conf.setCombinerClass(ReducerClass.class);
 		conf.setReducerClass(ReducerClass.class);
 		
 		conf.setInputFormat(SequenceFileInputFormat.class);
