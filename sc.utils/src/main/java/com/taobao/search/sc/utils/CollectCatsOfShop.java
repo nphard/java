@@ -1,12 +1,12 @@
 package com.taobao.search.sc.utils;
-
+ 
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Random;
 import java.util.Set;
 import java.util.HashSet;
 
@@ -36,10 +36,12 @@ import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.IntWritable;
 
+import ws.Wsjni;
+
 public class CollectCatsOfShop extends Configured implements Tool {
 
 	public static class MapClass extends MapReduceBase implements
-			Mapper<IntWritable, Text, IntWritable,Text> {
+			Mapper<LongWritable, Text, IntWritable,Text> {
 
 		static enum Counters {
 			Items
@@ -51,12 +53,14 @@ public class CollectCatsOfShop extends Configured implements Tool {
 
 		private long numRecords = 0;
 		private String inputFile;
-
+		
+		private Wsjni ws = null;
+		
 		public void configure(JobConf job) {
-			caseSensitive = job.getBoolean("topnfields.casesensitive", true);
+			caseSensitive = job.getBoolean("collect.casesensitive", true);
 			inputFile = job.get("map.input.file");
-
-			if (job.getBoolean("topnfields.skip.patterns", false)) {
+			
+			if (job.getBoolean("collect.skip.patterns", false)) {
 				Path[] patternsFiles = new Path[0];
 				try {
 					patternsFiles = DistributedCache.getLocalCacheFiles(job);
@@ -65,9 +69,22 @@ public class CollectCatsOfShop extends Configured implements Tool {
 							.println("Caught exception while getting cached files: "
 									+ StringUtils.stringifyException(ioe));
 				}
-				for (Path patternsFile : patternsFiles) {
-					parseSkipFile(patternsFile);
+				if (patternsFiles != null){
+					for (Path patternsFile : patternsFiles) {
+						parseSkipFile(patternsFile);
+					}
 				}
+			}
+			if(job.getBoolean("collect.segmentation", false)){
+				ws = new Wsjni();
+				if(ws.ws_init("./ws/taobao.conf") != 0){
+					System.out.println("fail to init ws. ");
+					return;
+				}
+				else{
+					System.out.println("Sucess init ws module!");
+				}
+				//ws.debug  = 1;
 			}
 		}
 
@@ -88,7 +105,7 @@ public class CollectCatsOfShop extends Configured implements Tool {
 			}
 		}
 
-		public void map(IntWritable key, Text value,
+		public void map(LongWritable key, Text value,
 				OutputCollector<IntWritable,Text> output, Reporter reporter)
 				throws IOException {
 			
@@ -97,9 +114,20 @@ public class CollectCatsOfShop extends Configured implements Tool {
 					String txtValue = (caseSensitive) ? records[3]:records[3].toLowerCase();
 					txtValue = txtValue.trim();
 					for (String pattern : patternsToSkip) {
-						txtValue = txtValue.replaceAll(pattern, "");
+						txtValue = txtValue.replaceAll(pattern, " ");
 					}
-					recordValue.set(txtValue);
+					String [] words = (String[])ws.ws_segment_arr(txtValue);
+					StringBuilder sb = new StringBuilder();
+					if(words == null){
+						System.err.println("Error for the segmentation: "+txtValue);
+					}
+					else{
+						for(int j=0; j<words.length; j++){
+							sb.append(words[j]);
+							sb.append(" ");
+						}
+					}
+					recordValue.set(sb.toString());
 					int idKey = Integer.parseInt(records[2]);
 					output.collect(new IntWritable(idKey), recordValue);
 					reporter.incrCounter(Counters.Items, 1);
@@ -108,6 +136,12 @@ public class CollectCatsOfShop extends Configured implements Tool {
 					reporter.setStatus("Finished processing " + numRecords
 							+ " records" + "from the input file:" + inputFile);
 				}
+		}
+		
+		public void close(){
+			if(ws != null) {
+				ws.ws_destroy();
+			}
 		}
 	}
 
@@ -140,13 +174,14 @@ public class CollectCatsOfShop extends Configured implements Tool {
 		conf.setCombinerClass(ReduceClass.class);
 		conf.setReducerClass(ReduceClass.class);
 		conf.setInputFormat(TextInputFormat.class);
+		conf.setNumReduceTasks(3);
 
 		List<String> other_args = new ArrayList<String>();
 		for (int i = 0; i < args.length; ++i) {
 			if ("-skip".equals(args[i])) {
 				DistributedCache
 						.addCacheFile(new Path(args[++i]).toUri(), conf);
-				conf.setBoolean("topnfields.skip.patterns", true);
+				conf.setBoolean("collect.skip.patterns", true);
 			} else {
 				other_args.add(args[i]);
 			}
@@ -154,6 +189,11 @@ public class CollectCatsOfShop extends Configured implements Tool {
 
 		//Path tempDir = new Path(other_args.get(1) + Integer.toString(new Random().nextInt(Integer.MAX_VALUE)));
 
+		conf.set("mapred.child.java.opts","-Djava.library.path=./ws");     
+	    DistributedCache.createSymlink(conf);
+	    DistributedCache.addCacheArchive(new URI("/group/tbsc-dev/laisheng/ws_0.9.6.3-1.1.x86.jar#ws"),conf);
+
+		
 		try {
 			FileInputFormat.setInputPaths(conf, new Path(other_args.get(0)));
 
