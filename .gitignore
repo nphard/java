@@ -2,4 +2,6 @@
 !.gitignore
 *.class
 target
+output
 *~
+*.jar
